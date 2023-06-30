@@ -15,7 +15,10 @@ use serde_json::json;
 
 use crate::{
     email::Email,
-    model::{LoginUserSchema, RegisterUserSchema, TokenClaims, User},
+    model::{
+        ForgotPasswordSchema, LoginUserSchema, RegisterUserSchema, ResetPasswordSchema,
+        TokenClaims, User,
+    },
     response::{ErrorResponse, FilteredUser},
     AppState,
 };
@@ -71,7 +74,7 @@ pub async fn register_user_handler(
         })
         .map(|hash| hash.to_string())?;
 
-    let verification_code = generate_random_string(10);
+    let verification_code = generate_random_string(20);
     let email = body.email.to_owned().to_ascii_lowercase();
     let id = uuid::Uuid::new_v4().to_string();
     let verification_url = format!(
@@ -239,7 +242,7 @@ pub async fn verify_email_handler(
     sqlx::query(
         "UPDATE users SET verification_code = $1, verified = $2 WHERE verification_code = $3",
     )
-    .bind("")
+    .bind(Option::<String>::None)
     .bind(true)
     .bind(&verification_code)
     .execute(&data.db)
@@ -259,6 +262,166 @@ pub async fn verify_email_handler(
     );
 
     Ok(Json(response))
+}
+
+pub async fn forgot_password_handler(
+    State(data): State<Arc<AppState>>,
+    Json(body): Json<ForgotPasswordSchema>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let err_message = "You will receive a password reset email if user with that email exist";
+
+    let user: User = sqlx::query_as("SELECT * FROM users WHERE email = $1")
+        .bind(&body.email.to_owned().to_ascii_lowercase())
+        .fetch_optional(&data.db)
+        .await
+        .map_err(|e| {
+            let error_response = ErrorResponse {
+                status: "error",
+                message: format!("Database error: {}", e),
+            };
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
+        })?
+        .ok_or_else(|| {
+            let error_response = ErrorResponse {
+                status: "fail",
+                message: err_message.to_string(),
+            };
+            (StatusCode::OK, Json(error_response))
+        })?;
+
+    if !user.verified {
+        let error_response = ErrorResponse {
+            status: "fail",
+            message: "Account not verified".to_string(),
+        };
+        return Err((StatusCode::FORBIDDEN, Json(error_response)));
+    }
+
+    let password_reset_token = generate_random_string(20);
+    let password_token_expires_in = 10; // 10 minutes
+    let password_reset_at =
+        chrono::Utc::now() + chrono::Duration::minutes(password_token_expires_in);
+    let password_reset_url = format!(
+        "{}/resetpassword/{}",
+        data.config.frontend_origin.to_owned(),
+        password_reset_token
+    );
+
+    sqlx::query(
+        "UPDATE users SET password_reset_token = $1, password_reset_at = $2 WHERE email = $3",
+    )
+    .bind(password_reset_token)
+    .bind(password_reset_at)
+    .bind(&user.email.clone().to_ascii_lowercase())
+    .execute(&data.db)
+    .await
+    .map_err(|e| {
+        let json_error = ErrorResponse {
+            status: "fail",
+            message: format!("Error updating user: {}", e),
+        };
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(json_error))
+    })?;
+
+    let email_instance = Email::new(user, password_reset_url, data.config.clone());
+    if let Err(_) = email_instance
+        .send_password_reset_token(password_token_expires_in)
+        .await
+    {
+        let json_error = ErrorResponse {
+            status: "fail",
+            message: "Something bad happended while sending the password reset code".to_string(),
+        };
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json_error)));
+    }
+
+    let response = serde_json::json!({
+            "status": "success",
+            "message": err_message
+        }
+    );
+
+    Ok(Json(response))
+}
+
+pub async fn reset_password_handler(
+    State(data): State<Arc<AppState>>,
+    Path(password_reset_token): Path<String>,
+    Json(body): Json<ResetPasswordSchema>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    if body.password != body.password_confirm {
+        let error_response = ErrorResponse {
+            status: "fail",
+            message: "Passwords do not match".to_string(),
+        };
+        return Err((StatusCode::BAD_REQUEST, Json(error_response)));
+    }
+
+    let user: User = sqlx::query_as(
+        "SELECT * FROM users WHERE password_reset_token = $1 AND password_reset_at > $2",
+    )
+    .bind(password_reset_token)
+    .bind(chrono::Utc::now())
+    .fetch_optional(&data.db)
+    .await
+    .map_err(|e| {
+        let error_response = ErrorResponse {
+            status: "error",
+            message: format!("Database error: {}", e),
+        };
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
+    })?
+    .ok_or_else(|| {
+        let error_response = ErrorResponse {
+            status: "fail",
+            message: "The password reset token is invalid or has expired".to_string(),
+        };
+        (StatusCode::FORBIDDEN, Json(error_response))
+    })?;
+
+    let salt = SaltString::generate(&mut OsRng);
+    let hashed_password = Argon2::default()
+        .hash_password(body.password.as_bytes(), &salt)
+        .map_err(|e| {
+            let error_response = ErrorResponse {
+                status: "fail",
+                message: format!("Error while hashing password: {}", e),
+            };
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(error_response))
+        })
+        .map(|hash| hash.to_string())?;
+
+    sqlx::query(
+        "UPDATE users SET password = $1, password_reset_token = $2, password_reset_at = $3 WHERE email = $4",
+    )
+    .bind(hashed_password)
+    .bind(Option::<String>::None)
+    .bind(Option::<String>::None)
+    .bind(&user.email.clone().to_ascii_lowercase())
+    .execute(&data.db)
+    .await
+    .map_err(|e| {
+        let json_error = ErrorResponse {
+            status: "fail",
+            message: format!("Error updating user: {}", e),
+        };
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(json_error))
+    })?;
+
+    let cookie = Cookie::build("token", "")
+        .path("/")
+        .max_age(time::Duration::minutes(-1))
+        .same_site(SameSite::Lax)
+        .http_only(true)
+        .finish();
+
+    let mut response = Response::new(
+        json!({"status": "success", "message": "Password data updated successfully"}).to_string(),
+    );
+    response
+        .headers_mut()
+        .insert(header::SET_COOKIE, cookie.to_string().parse().unwrap());
+    Ok(response)
 }
 
 pub async fn logout_handler() -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {

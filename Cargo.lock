@@ -1513,7 +1513,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust-user-signup-email-verification"
+name = "rust-user-signup-signin-email"
 version = "0.1.0"
 dependencies = [
  "argon2",

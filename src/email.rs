@@ -89,4 +89,19 @@ impl Email {
         self.send_email("verification_code", "Your account verification code")
             .await
     }
+
+    pub async fn send_password_reset_token(
+        &self,
+        password_reset_token_expires_in: i64,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.send_email(
+            "reset_password",
+            format!(
+                "Your password reset token (valid for only {} minutes)",
+                password_reset_token_expires_in
+            )
+            .as_str(),
+        )
+        .await
+    }
 }
