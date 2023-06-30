@@ -1,0 +1,4 @@
+/target
+
+# Ignore SQLite files
+sqlite.*
