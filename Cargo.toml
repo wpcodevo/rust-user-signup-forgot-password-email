@@ -1,5 +1,5 @@
 [package]
-name = "rust-user-signup-signin-email"
+name = "rust-user-signup-forgot-password-email"
 version = "0.1.0"
 edition = "2021"
 
