@@ -278,11 +278,13 @@ pub async fn logout_handler() -> Result<impl IntoResponse, (StatusCode, Json<ser
 pub async fn get_me_handler(
     Extension(user): Extension<User>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let filtered_user = FilteredUser::new_user(&user);
+
     let json_response = serde_json::json!({
-        "status":  "success",
-        "data": serde_json::json!({
-            "user": FilteredUser::new_user(&user)
-        })
+        "status": "success",
+        "data": {
+            "user": filtered_user
+        }
     });
 
     Ok(Json(json_response))
