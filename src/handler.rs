@@ -8,7 +8,6 @@ use axum::{
     Extension, Json,
 };
 use axum_extra::extract::cookie::{Cookie, SameSite};
-use chrono::{DateTime, Utc};
 use jsonwebtoken::{encode, EncodingKey, Header};
 use rand::{distributions::Alphanumeric, rngs::OsRng, Rng};
 use serde_json::json;
@@ -442,29 +441,16 @@ pub async fn logout_handler() -> Result<impl IntoResponse, (StatusCode, Json<ser
 pub async fn get_me_handler(
     Extension(user): Extension<User>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let filtered_user = FilteredUser::new_user(&user);
+
     let json_response = serde_json::json!({
         "status":  "success",
         "data": serde_json::json!({
-            "user": filter_user_record(&user)
+            "user": filtered_user
         })
     });
 
     Ok(Json(json_response))
-}
-
-fn filter_user_record(user: &User) -> FilteredUser {
-    let created_at_utc: DateTime<Utc> = DateTime::from_utc(user.created_at.unwrap(), Utc);
-    let updated_at_utc: DateTime<Utc> = DateTime::from_utc(user.updated_at.unwrap(), Utc);
-    FilteredUser {
-        id: user.id.to_string(),
-        email: user.email.to_owned(),
-        name: user.name.to_owned(),
-        photo: user.photo.to_owned(),
-        role: user.role.to_owned(),
-        verified: user.verified,
-        createdAt: created_at_utc,
-        updatedAt: updated_at_utc,
-    }
 }
 
 fn generate_random_string(length: usize) -> String {
