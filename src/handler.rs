@@ -268,9 +268,10 @@ pub async fn forgot_password_handler(
     Json(body): Json<ForgotPasswordSchema>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
     let err_message = "You will receive a password reset email if user with that email exist";
+    let email_address = body.email.to_owned().to_ascii_lowercase();
 
     let user: User = sqlx::query_as("SELECT * FROM users WHERE email = $1")
-        .bind(&body.email.to_owned().to_ascii_lowercase())
+        .bind(&email_address.clone())
         .fetch_optional(&data.db)
         .await
         .map_err(|e| {
@@ -300,27 +301,12 @@ pub async fn forgot_password_handler(
     let password_token_expires_in = 10; // 10 minutes
     let password_reset_at =
         chrono::Utc::now() + chrono::Duration::minutes(password_token_expires_in);
+
     let password_reset_url = format!(
         "{}/resetpassword/{}",
         data.config.frontend_origin.to_owned(),
         password_reset_token
     );
-
-    sqlx::query(
-        "UPDATE users SET password_reset_token = $1, password_reset_at = $2 WHERE email = $3",
-    )
-    .bind(password_reset_token)
-    .bind(password_reset_at)
-    .bind(&user.email.clone().to_ascii_lowercase())
-    .execute(&data.db)
-    .await
-    .map_err(|e| {
-        let json_error = ErrorResponse {
-            status: "fail",
-            message: format!("Error updating user: {}", e),
-        };
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json_error))
-    })?;
 
     let email_instance = Email::new(user, password_reset_url, data.config.clone());
     if let Err(_) = email_instance
@@ -333,6 +319,22 @@ pub async fn forgot_password_handler(
         };
         return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json_error)));
     }
+
+    sqlx::query(
+        "UPDATE users SET password_reset_token = $1, password_reset_at = $2 WHERE email = $3",
+    )
+    .bind(password_reset_token)
+    .bind(&password_reset_at.clone())
+    .bind(&email_address.clone())
+    .execute(&data.db)
+    .await
+    .map_err(|e| {
+        let json_error = ErrorResponse {
+            status: "fail",
+            message: format!("Error updating user: {}", e),
+        };
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(json_error))
+    })?;
 
     let response = serde_json::json!({
             "status": "success",
