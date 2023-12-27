@@ -194,12 +194,11 @@ pub async fn login_user_handler(
     )
     .unwrap();
 
-    let cookie = Cookie::build("token", token.to_owned())
+    let cookie = Cookie::build(("token", token.to_owned()))
         .path("/")
         .max_age(time::Duration::hours(1))
         .same_site(SameSite::Lax)
-        .http_only(true)
-        .finish();
+        .http_only(true);
 
     let mut response = Response::new(json!({"status": "success", "token": token}).to_string());
     response
@@ -408,12 +407,11 @@ pub async fn reset_password_handler(
         (StatusCode::INTERNAL_SERVER_ERROR, Json(json_error))
     })?;
 
-    let cookie = Cookie::build("token", "")
+    let cookie = Cookie::build(("token", ""))
         .path("/")
         .max_age(time::Duration::minutes(-1))
         .same_site(SameSite::Lax)
-        .http_only(true)
-        .finish();
+        .http_only(true);
 
     let mut response = Response::new(
         json!({"status": "success", "message": "Password data updated successfully"}).to_string(),
@@ -425,12 +423,11 @@ pub async fn reset_password_handler(
 }
 
 pub async fn logout_handler() -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
-    let cookie = Cookie::build("token", "")
+    let cookie = Cookie::build(("token", ""))
         .path("/")
         .max_age(time::Duration::hours(-1))
         .same_site(SameSite::Lax)
-        .http_only(true)
-        .finish();
+        .http_only(true);
 
     let mut response = Response::new(json!({"status": "success"}).to_string());
     response

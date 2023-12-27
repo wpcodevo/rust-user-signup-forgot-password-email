@@ -5,7 +5,7 @@ use axum::{
     http::{header, Request, StatusCode},
     middleware::Next,
     response::IntoResponse,
-    Json,
+    Json, body::Body,
 };
 
 use axum_extra::extract::cookie::CookieJar;
@@ -17,11 +17,11 @@ use crate::{
     AppState,
 };
 
-pub async fn auth<B>(
+pub async fn auth(
     cookie_jar: CookieJar,
     State(data): State<Arc<AppState>>,
-    mut req: Request<B>,
-    next: Next<B>,
+    mut req: Request<Body>,
+    next: Next,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
     let token = cookie_jar
         .get("token")
